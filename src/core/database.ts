@@ -47,12 +47,19 @@ export interface Note {
   timestamp: number;
 }
 
+export interface NoteWithSession extends Note {
+  session_created_at: number;
+  session_user_prompt?: string;
+}
+
 export interface SearchResult extends Session {
   rank?: number;
   matched_text?: string;
 }
 
 export class MemoryDatabase {
+  static readonly STALE_SESSION_MS = 24 * 60 * 60 * 1000;
+
   // Using `any` here because we provide a local ambient type for better-sqlite3 in src/types.
   private db: any;
 
@@ -258,13 +265,50 @@ export class MemoryDatabase {
     return results;
   }
 
+  searchNotes(projectPath: string, query: string, limit = 5): NoteWithSession[] {
+    const searchQuery = this.buildSearchQuery(query);
+    if (!searchQuery) return [];
+
+    return this.db.prepare(`
+      SELECT n.*, s.created_at as session_created_at, s.user_prompt as session_user_prompt
+      FROM notes_fts fts
+      JOIN notes n ON n.id = fts.note_id
+      JOIN sessions s ON s.id = n.session_id
+      WHERE fts.notes_fts MATCH ?
+        AND s.project_path = ?
+      ORDER BY fts.rank LIMIT ?
+    `).all(searchQuery, projectPath, limit) as NoteWithSession[];
+  }
+
+  closeStaleActiveSessions(projectPath: string, thresholdMs = MemoryDatabase.STALE_SESSION_MS): number {
+    const cutoff = Date.now() - thresholdMs;
+    const result = this.db.prepare(
+      `UPDATE sessions SET status = 'completed', ended_at = ?
+       WHERE project_path = ? AND status = 'active' AND created_at < ?`
+    ).run(Date.now(), projectPath, cutoff);
+    return result.changes as number;
+  }
+
+  deleteSession(sessionId: string): boolean {
+    const result = this.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(sessionId);
+    return (result.changes as number) > 0;
+  }
+
+  pruneSessions(projectPath: string, olderThanDays: number): number {
+    const cutoff = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+    const result = this.db.prepare(
+      `DELETE FROM sessions WHERE project_path = ? AND status != 'active' AND created_at < ?`
+    ).run(projectPath, cutoff);
+    return result.changes as number;
+  }
+
   private buildSearchQuery(prompt: string): string {
     const keywords = prompt
       .toLowerCase()
       .replace(/[^\w\s]/g, '')
       .split(/\s+/)
-      .filter((w) => w.length > 3)
-      .slice(0, 5);
+      .filter((w) => w.length >= 3)
+      .slice(0, 10);
     return keywords.join(' OR ');
   }
 
@@ -350,6 +394,18 @@ export class MemoryDatabase {
       CREATE TRIGGER IF NOT EXISTS notes_fts_insert AFTER INSERT ON notes BEGIN
         INSERT INTO notes_fts(note_id, user_prompt, ai_response, annotation)
         VALUES (new.id, new.user_prompt, new.ai_response, new.annotation);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS sessions_fts_delete AFTER DELETE ON sessions BEGIN
+        DELETE FROM sessions_fts WHERE session_id = old.id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS observations_fts_delete AFTER DELETE ON observations BEGIN
+        DELETE FROM observations_fts WHERE observation_id = old.id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS notes_fts_delete AFTER DELETE ON notes BEGIN
+        DELETE FROM notes_fts WHERE note_id = old.id;
       END;
     `;
 

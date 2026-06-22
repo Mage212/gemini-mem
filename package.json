@@ -16,7 +16,15 @@
     "antigravity-mem": "./dist/cli/index.js",
     "antigravity-memory": "./dist/cli/index.js"
   },
-  "main": "dist/cli/index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
   "files": [
     "dist/**/*"
   ],
@@ -24,6 +32,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "ts-node src/cli/index.ts",
     "init": "ts-node src/cli/index.ts init",
+    "api": "ts-node src/api/server.ts",
     "mcp": "ts-node src/mcp/server.ts",
     "prepublishOnly": "npm run build",
     "test": "echo 'tests pending'"

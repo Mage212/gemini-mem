@@ -1,4 +1,4 @@
-import { MemoryDatabase, Session, Note } from './database';
+import { MemoryDatabase, Session, Note, NoteWithSession } from './database';
 
 export interface BuildContextOptions {
   projectPath: string;
@@ -16,8 +16,17 @@ export class ContextManager {
       ? this.db.searchSessions(projectPath, currentPrompt, searchLimit)
       : [];
 
-    const merged = this.deduplicate([...recent, ...relevant]);
-    return this.formatContext(merged);
+    const sessions = this.deduplicate([...recent, ...relevant]);
+    const includedSessionIds = new Set(sessions.map((s) => s.id));
+
+    // Find notes from sessions not already included in the context
+    const relatedNotes = currentPrompt
+      ? this.db
+          .searchNotes(projectPath, currentPrompt, 8)
+          .filter((n) => !includedSessionIds.has(n.session_id))
+      : [];
+
+    return this.formatContext(sessions, relatedNotes);
   }
 
   private deduplicate(sessions: Session[]): Session[] {
@@ -29,8 +38,8 @@ export class ContextManager {
     });
   }
 
-  private formatContext(sessions: Session[]): string {
-    if (sessions.length === 0) {
+  private formatContext(sessions: Session[], relatedNotes: NoteWithSession[] = []): string {
+    if (sessions.length === 0 && relatedNotes.length === 0) {
       return 'No prior memory for this project.';
     }
 
@@ -38,24 +47,46 @@ export class ContextManager {
     parts.push('# Antigravity Memory Context');
     parts.push('Use these past sessions to ground your response.');
 
-    sessions.forEach((session) => {
-      const date = new Date(session.created_at).toISOString().split('T')[0];
-      parts.push(`\n## Session ${date}`);
-      if (session.user_prompt) parts.push(`Task: ${session.user_prompt}`);
-      if (session.summary) parts.push(session.summary.trim());
+    if (sessions.length > 0) {
+      sessions.forEach((session) => {
+        const date = new Date(session.created_at).toISOString().split('T')[0];
+        parts.push(`\n## Session ${date} [${session.status}]`);
+        if (session.user_prompt) parts.push(`Task: ${session.user_prompt}`);
+        if (session.summary) parts.push(session.summary.trim());
 
-      // Include notes (the primary capture mechanism)
-      const notes = this.db.getNotesForSession(session.id);
-      if (notes.length > 0) {
-        parts.push('\n### Key Actions');
-        notes.forEach((note: Note) => {
-          if (note.ai_response) parts.push(`- ${note.ai_response}`);
-          if (note.annotation) parts.push(`  Note: ${note.annotation}`);
-        });
-      }
+        const notes = this.db.getNotesForSession(session.id);
+        if (notes.length > 0) {
+          parts.push('\n### Key Actions');
+          notes.forEach((note: Note) => {
+            if (note.ai_response) parts.push(`- ${note.ai_response}`);
+            if (note.annotation) parts.push(`  Note: ${note.annotation}`);
+          });
+        }
 
-      if (session.total_observations) parts.push(`\nChanges captured: ${session.total_observations}`);
-    });
+        const statusParts: string[] = [];
+        if (session.total_observations) statusParts.push(`${session.total_observations} changes captured`);
+        if (session.tokens_saved) statusParts.push(`~${session.tokens_saved} tokens saved`);
+        if (statusParts.length > 0) parts.push(`\n${statusParts.join(' · ')}`);
+      });
+    }
+
+    if (relatedNotes.length > 0) {
+      parts.push('\n## Related Past Notes');
+      parts.push('These notes from older sessions matched your current query:');
+      const seenSessions = new Set<string>();
+      relatedNotes.forEach((note) => {
+        const date = new Date(note.session_created_at).toISOString().split('T')[0];
+        const sessionLabel = note.session_user_prompt
+          ? `"${note.session_user_prompt}"`
+          : note.session_id;
+        if (!seenSessions.has(note.session_id)) {
+          parts.push(`\n### From session ${date} — ${sessionLabel}`);
+          seenSessions.add(note.session_id);
+        }
+        if (note.ai_response) parts.push(`- ${note.ai_response}`);
+        if (note.annotation) parts.push(`  Note: ${note.annotation}`);
+      });
+    }
 
     parts.push('\n--\nRespond using this context; do not ask the user to restate it.');
     return parts.join('\n');

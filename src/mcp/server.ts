@@ -69,7 +69,7 @@ server.tool(
 
 server.tool(
   'memory_get_or_start_session',
-  'Return the active session for a project, or start one if none exists.',
+  'Return the active session for a project, or start one if none exists. Automatically closes sessions that have been active for more than 24 hours.',
   {
     projectPath: z.string().describe('Absolute path to the project directory'),
     userPrompt: z.string().optional().describe('If creating, initial user prompt')
@@ -78,6 +78,14 @@ server.tool(
     try {
       const existing = db.getActiveSession(projectPath);
       if (existing) {
+        const isStale = Date.now() - existing.created_at > MemoryDatabase.STALE_SESSION_MS;
+        if (isStale) {
+          db.closeStaleActiveSessions(projectPath);
+          const session = db.createSession(projectPath, userPrompt);
+          return {
+            content: [{ type: 'text' as const, text: `Previous session was stale (>24h old) — auto-closed. New session started: ${session.id}` }]
+          };
+        }
         return {
           content: [{ type: 'text' as const, text: `Active session found: ${existing.id}` }]
         };
@@ -259,6 +267,58 @@ server.tool(
       return { content: [{ type: 'text' as const, text: `Recent sessions:\n${lines.join('\n')}` }] };
     } catch (err: any) {
       console.error('[MCP] memory_list_sessions error:', err.message);
+      return { content: [{ type: 'text' as const, text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// ─── Tool: Delete a session ──────────────────────────────────────────────────
+
+server.tool(
+  'memory_delete_session',
+  'Permanently delete a session and all its observations and notes. Use with caution — this cannot be undone.',
+  {
+    sessionId: z.string().describe('The session ID to delete')
+  },
+  async ({ sessionId }) => {
+    try {
+      const session = db.getSession(sessionId);
+      if (!session) {
+        return { content: [{ type: 'text' as const, text: `Error: session not found: ${sessionId}` }], isError: true };
+      }
+      const deleted = db.deleteSession(sessionId);
+      return {
+        content: [{ type: 'text' as const, text: deleted ? `Session ${sessionId} permanently deleted.` : `Failed to delete session ${sessionId}.` }]
+      };
+    } catch (err: any) {
+      console.error('[MCP] memory_delete_session error:', err.message);
+      return { content: [{ type: 'text' as const, text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// ─── Tool: Cleanup sessions ──────────────────────────────────────────────────
+
+server.tool(
+  'memory_cleanup_sessions',
+  'Prune old completed sessions and auto-close stale active sessions. Useful for reclaiming space or resetting leftover open sessions.',
+  {
+    projectPath: z.string().describe('Project path to clean up'),
+    olderThanDays: z.number().optional().default(30).describe('Delete completed sessions older than this many days (default: 30)'),
+    closeStaleAfterHours: z.number().optional().default(24).describe('Auto-close active sessions idle longer than this many hours (default: 24)')
+  },
+  async ({ projectPath, olderThanDays, closeStaleAfterHours }) => {
+    try {
+      const staleClosed = db.closeStaleActiveSessions(projectPath, closeStaleAfterHours * 60 * 60 * 1000);
+      const pruned = db.pruneSessions(projectPath, olderThanDays);
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Cleanup complete.\nStale active sessions closed: ${staleClosed}\nOld sessions pruned (older than ${olderThanDays} days): ${pruned}`
+        }]
+      };
+    } catch (err: any) {
+      console.error('[MCP] memory_cleanup_sessions error:', err.message);
       return { content: [{ type: 'text' as const, text: `Error: ${err.message}` }], isError: true };
     }
   }
