@@ -1,6 +1,6 @@
 {
   "name": "antigravity-memory",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Persistent memory layer for AI coding tools — never lose context across sessions",
   "author": "Keyut Shah",
   "license": "MIT",
