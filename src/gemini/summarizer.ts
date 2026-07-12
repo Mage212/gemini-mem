@@ -7,6 +7,10 @@ const MAX_RETRIES = 2;
 export class SessionSummarizer {
   constructor(private db: MemoryDatabase, private gemini: GeminiClient) {}
 
+  /**
+   * Summarize and close a session. This is the single owner of endSession —
+   * callers (MCP, API, CLI) must not call endSession again afterwards.
+   */
   async summarize(sessionId: string): Promise<string> {
     const session = this.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
@@ -21,21 +25,18 @@ export class SessionSummarizer {
       compressedCount: compressed.length
     });
 
-    // Gather notes as additional context (or fallback if no observations)
     const notes = this.db.getNotesForSession(sessionId);
     console.error('[Summarizer] Notes found', { notesCount: notes.length });
 
     if (compressed.length === 0 && notes.length === 0) {
       console.warn('[Summarizer] No observations or notes for session', sessionId);
       const fallback = `Session started with intent: "${session.user_prompt || 'Unknown'}". No observations or notes were recorded.`;
-      this.db.endSession(sessionId, fallback, 'summarized');
+      this.db.endSession(sessionId, fallback, 'completed');
       return fallback;
     }
 
-    // Build texts from compressed observations + notes
     const compressedTexts = compressed.map((o) => o.compressed_data as string);
 
-    // Add notes as context (these capture prompt/response pairs)
     for (const note of notes) {
       const parts: string[] = [];
       if (note.user_prompt) parts.push(`User asked: ${note.user_prompt}`);
@@ -56,7 +57,6 @@ export class SessionSummarizer {
       summaryLength: summary.length
     });
 
-    // Quality guardrail: retry if summary is too short
     let retries = 0;
     while (summary.length < MIN_SUMMARY_LENGTH && retries < MAX_RETRIES) {
       retries++;
@@ -86,7 +86,7 @@ export class SessionSummarizer {
       retries
     });
 
-    this.db.endSession(sessionId, summary, 'summarized');
+    this.db.endSession(sessionId, summary, 'completed');
     return summary;
   }
 

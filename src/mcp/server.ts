@@ -3,32 +3,33 @@
 import path from 'path';
 import os from 'os';
 
-// MCP SDK imports
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-// Direct imports of our modules
 import { MemoryDatabase } from '../core/database';
 import { ContextManager } from '../core/context-manager';
+import { CompressionQueue } from '../core/compression-queue';
 import { GeminiClient } from '../gemini/client';
 import { SessionSummarizer } from '../gemini/summarizer';
 
-// DB path: prefer env var (set by MCP config), fallback to ~/.antigravity-mem/memory.db
 const dbPath = process.env.ANTIGRAVITY_MEM_DB || path.join(os.homedir(), '.antigravity-mem', 'memory.db');
 console.error('[MCP] Initializing with DB:', dbPath);
-console.error('[MCP] Gemini model:', process.env.GEMINI_MODEL || 'default');
+console.error('[MCP] Gemini model:', process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite');
 
 let db: MemoryDatabase;
 let contextBuilder: ContextManager;
 let gemini: GeminiClient;
 let summarizer: SessionSummarizer;
+let compressionQueue: CompressionQueue;
 
 try {
   db = new MemoryDatabase(dbPath);
   contextBuilder = new ContextManager(db);
   gemini = new GeminiClient();
   summarizer = new SessionSummarizer(db, gemini);
+  compressionQueue = new CompressionQueue(db, gemini);
+  compressionQueue.start();
   console.error('[MCP] All modules initialized successfully');
 } catch (err: any) {
   console.error('[MCP] FATAL: Failed to initialize modules:', err.message);
@@ -37,10 +38,8 @@ try {
 
 const server = new McpServer({
   name: 'antigravity-memory',
-  version: '0.2.0'
+  version: '0.3.0'
 });
-
-// ─── Tool: Start a memory session ────────────────────────────────────────────
 
 server.tool(
   'memory_start_session',
@@ -55,7 +54,7 @@ server.tool(
       return {
         content: [{
           type: 'text' as const,
-          text: `Memory session started.\nSession ID: ${session.id}\nProject: ${projectPath}\nUse this session ID for save_note and end_session calls.`
+          text: `Memory session started.\nSession ID: ${session.id}\nProject: ${session.project_path}\nUse this session ID for save_note and end_session calls.`
         }]
       };
     } catch (err: any) {
@@ -64,8 +63,6 @@ server.tool(
     }
   }
 );
-
-// ─── Tool: Get or start active session ──────────────────────────────────────
 
 server.tool(
   'memory_get_or_start_session',
@@ -101,8 +98,6 @@ server.tool(
   }
 );
 
-// ─── Tool: Save a note (prompt + response capture) ──────────────────────────
-
 server.tool(
   'memory_save_note',
   'Save a note to the active session. Call this AFTER every significant action to record what happened. This is the PRIMARY way context is captured for future sessions. Be detailed — include file names, what changed, and why. The richer the note, the better the memory.',
@@ -130,8 +125,6 @@ server.tool(
   }
 );
 
-// ─── Tool: Get memory context ────────────────────────────────────────────────
-
 server.tool(
   'memory_get_context',
   'Retrieve past session context for a project. Use this at the START of a conversation to load historical knowledge about the codebase — what was done before, key decisions, files modified, etc.',
@@ -153,8 +146,6 @@ server.tool(
   }
 );
 
-// ─── Tool: End/summarize a session ───────────────────────────────────────────
-
 server.tool(
   'memory_end_session',
   'End and summarize a coding session. This generates a rich summary using Gemini from all saved notes and observations. Call this when the user is done with a task. IMPORTANT: Make sure you called memory_save_note at least once BEFORE calling this, otherwise the summary will be empty.',
@@ -167,17 +158,18 @@ server.tool(
       if (!session) {
         return { content: [{ type: 'text' as const, text: `Error: session not found: ${sessionId}` }], isError: true };
       }
+      // SessionSummarizer owns endSession (status=completed). Do not call endSession again here.
       const summary = await summarizer.summarize(sessionId);
-      db.endSession(sessionId, summary, 'completed');
       return { content: [{ type: 'text' as const, text: `Session summarized and saved.\n\nSummary:\n${summary}` }] };
     } catch (err: any) {
       console.error('[MCP] memory_end_session error:', err.message);
-      return { content: [{ type: 'text' as const, text: `Error summarizing: ${err.message}` }], isError: true };
+      return {
+        content: [{ type: 'text' as const, text: `Error summarizing: ${err.message}` }],
+        isError: true
+      };
     }
   }
 );
-
-// ─── Tool: Session status ───────────────────────────────────────────────────
 
 server.tool(
   'memory_session_status',
@@ -202,16 +194,14 @@ server.tool(
   }
 );
 
-// ─── Tool: Record an observation ─────────────────────────────────────────────
-
 server.tool(
   'memory_observe',
-  'Record a coding action/observation in the current session. Use this when you make a significant change (create file, modify component, fix bug, etc.).',
+  'Record a coding action/observation in the current session. Use this when you make a significant change (create file, modify component, fix bug, etc.). Compression is queued in the background and does not block this tool.',
   {
     sessionId: z.string().describe('The active session ID'),
     action: z.string().describe('What action was performed (e.g., "created file", "modified component", "fixed bug")'),
     details: z.string().describe('Details of the change — files affected, what changed, why'),
-    compress: z.boolean().optional().default(true).describe('Whether to queue this for Gemini compression')
+    compress: z.boolean().optional().default(true).describe('Whether to queue this for Gemini compression in the background')
   },
   async ({ sessionId, action, details, compress }) => {
     try {
@@ -223,18 +213,18 @@ server.tool(
       db.updateObservationResult(obs.id, details);
 
       if (compress) {
-        try {
-          const compressed = await gemini.compressObservation({
-            functionName: action,
-            functionArgs: JSON.stringify({ details }),
-            functionResult: details
-          });
-          const originalTokens = Math.ceil(details.length / 4);
-          const compressedTokens = Math.ceil(compressed.length / 4);
-          db.markObservationCompressed(obs.id, compressed, originalTokens, compressedTokens);
-        } catch (compErr: any) {
-          console.error('[MCP] Compression failed:', compErr.message);
-        }
+        const position = compressionQueue.enqueue({
+          observationId: obs.id,
+          functionName: action,
+          functionArgs: JSON.stringify({ details }),
+          functionResult: details
+        });
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Observation recorded (${obs.id}): ${action}. Compression queued (position ${position}).`
+          }]
+        };
       }
 
       return { content: [{ type: 'text' as const, text: `Observation recorded (${obs.id}): ${action}` }] };
@@ -244,8 +234,6 @@ server.tool(
     }
   }
 );
-
-// ─── Tool: List sessions for a project ───────────────────────────────────────
 
 server.tool(
   'memory_list_sessions',
@@ -272,8 +260,6 @@ server.tool(
   }
 );
 
-// ─── Tool: Delete a session ──────────────────────────────────────────────────
-
 server.tool(
   'memory_delete_session',
   'Permanently delete a session and all its observations and notes. Use with caution — this cannot be undone.',
@@ -296,8 +282,6 @@ server.tool(
     }
   }
 );
-
-// ─── Tool: Cleanup sessions ──────────────────────────────────────────────────
 
 server.tool(
   'memory_cleanup_sessions',
@@ -323,8 +307,6 @@ server.tool(
     }
   }
 );
-
-// ─── Start the server ────────────────────────────────────────────────────────
 
 async function main() {
   const transport = new StdioServerTransport();

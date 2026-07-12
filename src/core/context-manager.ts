@@ -11,15 +11,20 @@ export class ContextManager {
   constructor(private db: MemoryDatabase) {}
 
   buildContext({ projectPath, currentPrompt = '', recentLimit = 5, searchLimit = 3 }: BuildContextOptions): string {
+    const active = this.db.getActiveSession(projectPath);
     const recent = this.db.getRecentSessions(projectPath, recentLimit);
     const relevant = currentPrompt
       ? this.db.searchSessions(projectPath, currentPrompt, searchLimit)
       : [];
 
-    const sessions = this.deduplicate([...recent, ...relevant]);
+    // Active session first so in-progress work is visible without keyword match.
+    const sessions = this.deduplicate([
+      ...(active ? [active] : []),
+      ...recent,
+      ...relevant
+    ]);
     const includedSessionIds = new Set(sessions.map((s) => s.id));
 
-    // Find notes from sessions not already included in the context
     const relatedNotes = currentPrompt
       ? this.db
           .searchNotes(projectPath, currentPrompt, 8)
@@ -50,9 +55,14 @@ export class ContextManager {
     if (sessions.length > 0) {
       sessions.forEach((session) => {
         const date = new Date(session.created_at).toISOString().split('T')[0];
-        parts.push(`\n## Session ${date} [${session.status}]`);
+        const label = session.status === 'active' ? 'active / in progress' : session.status;
+        parts.push(`\n## Session ${date} [${label}]`);
         if (session.user_prompt) parts.push(`Task: ${session.user_prompt}`);
-        if (session.summary) parts.push(session.summary.trim());
+        if (session.summary) {
+          parts.push(session.summary.trim());
+        } else if (session.status === 'active') {
+          parts.push('(No summary yet — session still active. See Key Actions below.)');
+        }
 
         const notes = this.db.getNotesForSession(session.id);
         if (notes.length > 0) {

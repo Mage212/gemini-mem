@@ -1,16 +1,16 @@
 {
   "name": "antigravity-memory",
-  "version": "0.2.0",
-  "description": "Persistent memory layer for AI coding tools — never lose context across sessions",
+  "version": "0.3.0",
+  "description": "Persistent memory layer for Antigravity IDE via MCP — never lose context across sessions",
   "author": "Keyut Shah",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/keyut-shah/gemini-mem.git"
+    "url": "https://github.com/Mage212/gemini-mem.git"
   },
-  "homepage": "https://github.com/keyut-shah/gemini-mem#readme",
+  "homepage": "https://github.com/Mage212/gemini-mem#readme",
   "bugs": {
-    "url": "https://github.com/keyut-shah/gemini-mem/issues"
+    "url": "https://github.com/Mage212/gemini-mem/issues"
   },
   "bin": {
     "antigravity-mem": "./dist/cli/index.js",
@@ -26,7 +26,9 @@
     }
   },
   "files": [
-    "dist/**/*"
+    "dist/**/*",
+    "templates/**/*",
+    "docs/**/*"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -35,7 +37,8 @@
     "api": "ts-node src/api/server.ts",
     "mcp": "ts-node src/mcp/server.ts",
     "prepublishOnly": "npm run build",
-    "test": "echo 'tests pending'"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [
     "antigravity",
@@ -59,7 +62,8 @@
   "devDependencies": {
     "@types/node": "^22.7.4",
     "ts-node": "^10.9.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^3.0.5"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -6,6 +6,22 @@ export interface CompressInput {
   functionResult?: string;
 }
 
+const DEFAULT_MODEL = 'gemini-2.5-flash-lite';
+
+function isRateLimited(err: any): boolean {
+  return (
+    err?.status === 429 ||
+    err?.message?.includes('429') ||
+    err?.message?.includes('quota') ||
+    err?.message?.includes('RESOURCE_EXHAUSTED')
+  );
+}
+
+function allowMockFallback(): boolean {
+  // Opt-in only. Silent mock fallback previously hid API failures from the agent.
+  return process.env.MOCK_GEMINI_FALLBACK === '1';
+}
+
 export class GeminiClient {
   private client: GoogleGenerativeAI;
   private modelName: string;
@@ -22,12 +38,15 @@ export class GeminiClient {
     }
 
     this.client = this.mock ? ({} as GoogleGenerativeAI) : new GoogleGenerativeAI(apiKey);
-    // Default model; can be overridden with GEMINI_MODEL.
-    this.modelName = process.env.GEMINI_MODEL || 'gemini-pro';
+    this.modelName = process.env.GEMINI_MODEL || DEFAULT_MODEL;
     console.error('[Gemini] Client initialized', {
       mock: this.mock,
       model: this.modelName
     });
+  }
+
+  getModelName(): string {
+    return this.modelName;
   }
 
   async compressObservation({ functionName, functionArgs = '', functionResult = '' }: CompressInput): Promise<string> {
@@ -46,40 +65,26 @@ export class GeminiClient {
     });
 
     try {
-      const model = this.client.getGenerativeModel({ model: this.modelName });
-      const result = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 400 }
-      });
-      const text = result.response.text();
-      console.error('[Gemini] compressObservation response received', {
-        responseLength: text.length
-      });
-      return text;
+      return await this.generate(prompt, { temperature: 0.2, maxOutputTokens: 400 });
     } catch (err: any) {
       console.error('[Gemini] compressObservation error:', err?.message || err);
-      // Retry once after delay for rate limiting (429)
-      if (err?.status === 429 || err?.message?.includes('429') || err?.message?.includes('quota') || err?.message?.includes('RESOURCE_EXHAUSTED')) {
+      if (isRateLimited(err)) {
         console.error('[Gemini] Rate limited — waiting 60s before retry...');
-        await new Promise(r => setTimeout(r, 60_000));
+        await new Promise((r) => setTimeout(r, 60_000));
         try {
-          const model = this.client.getGenerativeModel({ model: this.modelName });
-          const retryResult = await model.generateContent({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 400 }
-          });
-          const retryText = retryResult.response.text();
+          const retryText = await this.generate(prompt, { temperature: 0.2, maxOutputTokens: 400 });
           console.error('[Gemini] compressObservation RETRY succeeded', { responseLength: retryText.length });
           return retryText;
         } catch (retryErr: any) {
           console.error('[Gemini] compressObservation RETRY also failed:', retryErr?.message || retryErr);
+          err = retryErr;
         }
       }
-      if (process.env.MOCK_GEMINI_FALLBACK !== '0') {
-        console.warn('[Gemini] ⚠️ FALLING BACK TO MOCK — real API failed. Summary quality will be poor.');
+      if (allowMockFallback()) {
+        console.warn('[Gemini] MOCK_GEMINI_FALLBACK=1 — returning mock compression');
         return this.mockCompress(functionName, functionArgs, functionResult);
       }
-      throw err;
+      throw this.wrapError('compressObservation', err);
     }
   }
 
@@ -98,41 +103,56 @@ export class GeminiClient {
     });
 
     try {
-      const model = this.client.getGenerativeModel({ model: this.modelName });
-      const result = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 800 }
-      });
-      const text = result.response.text();
-      console.error('[Gemini] summarizeSession response received', {
-        responseLength: text.length
-      });
-      return text;
+      return await this.generate(prompt, { temperature: 0.3, maxOutputTokens: 800 });
     } catch (err: any) {
       console.error('[Gemini] summarizeSession error:', err?.message || err);
-      // Retry once after delay for rate limiting (429)
-      if (err?.status === 429 || err?.message?.includes('429') || err?.message?.includes('quota') || err?.message?.includes('RESOURCE_EXHAUSTED')) {
+      if (isRateLimited(err)) {
         console.error('[Gemini] Rate limited — waiting 60s before retry...');
-        await new Promise(r => setTimeout(r, 60_000));
+        await new Promise((r) => setTimeout(r, 60_000));
         try {
-          const model = this.client.getGenerativeModel({ model: this.modelName });
-          const retryResult = await model.generateContent({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.3, maxOutputTokens: 800 }
-          });
-          const retryText = retryResult.response.text();
+          const retryText = await this.generate(prompt, { temperature: 0.3, maxOutputTokens: 800 });
           console.error('[Gemini] summarizeSession RETRY succeeded', { responseLength: retryText.length });
           return retryText;
         } catch (retryErr: any) {
           console.error('[Gemini] summarizeSession RETRY also failed:', retryErr?.message || retryErr);
+          err = retryErr;
         }
       }
-      if (process.env.MOCK_GEMINI_FALLBACK !== '0') {
-        console.warn('[Gemini] ⚠️ FALLING BACK TO MOCK — real API failed. Summary quality will be poor.');
+      if (allowMockFallback()) {
+        console.warn('[Gemini] MOCK_GEMINI_FALLBACK=1 — returning mock summary');
         return this.mockSummarize(userPrompt, observations);
       }
-      throw err;
+      throw this.wrapError('summarizeSession', err);
     }
+  }
+
+  private async generate(
+    prompt: string,
+    generationConfig: { temperature: number; maxOutputTokens: number }
+  ): Promise<string> {
+    const model = this.client.getGenerativeModel({ model: this.modelName });
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig
+    });
+    const text = result.response.text();
+    console.error('[Gemini] response received', { responseLength: text.length });
+    return text;
+  }
+
+  private wrapError(op: string, err: any): Error {
+    const message = err?.message || String(err);
+    if (isRateLimited(err)) {
+      return new Error(
+        `Gemini API rate limit/quota exceeded during ${op}. Set a valid GEMINI_API_KEY with available quota and retry.`
+      );
+    }
+    if (/API_KEY|api key|permission|401|403/i.test(message)) {
+      return new Error(
+        `Gemini API authentication failed during ${op}: ${message}. Check GEMINI_API_KEY.`
+      );
+    }
+    return new Error(`Gemini API failed during ${op}: ${message}`);
   }
 
   private buildCompressionPrompt(fn: string, args: string, res: string): string {

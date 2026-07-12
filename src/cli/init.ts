@@ -11,12 +11,11 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import readline from 'readline';
+import { execFileSync } from 'child_process';
 
 const HOME = os.homedir();
 const DATA_DIR = path.join(HOME, '.antigravity-mem');
 const DB_PATH = path.join(DATA_DIR, 'memory.db');
-
-// ─── Supported IDEs ───────────────────────────────────────────────────────────
 
 interface IdeTarget {
   key: string;
@@ -53,8 +52,6 @@ const SUPPORTED_IDES: IdeTarget[] = [
   },
 ];
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 function ask(question: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
@@ -89,7 +86,14 @@ function writeIdeConfig(ide: IdeTarget, serverEntry: object): void {
   fs.writeFileSync(ide.configPath, JSON.stringify(config, null, 2) + '\n');
 }
 
-// ─── Main Init Flow ───────────────────────────────────────────────────────────
+function isGlobalBinaryInstalled(): boolean {
+  try {
+    execFileSync('antigravity-mem', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export async function runInit() {
   console.log('');
@@ -101,15 +105,12 @@ export async function runInit() {
   console.log('  ╚══════════════════════════════════════════════╝');
   console.log('');
 
-  // ─── Step 1: Gemini API key ─────────────────────────────────────────────────
-
   log('Step 1/3: Gemini API Key');
   log('────────────────────────');
   log('You need a Gemini API key for memory compression & summarization.');
   log('Get one free at: https://aistudio.google.com/apikey');
   log('');
 
-  // Try to find an existing key from any already-configured IDE
   let existingApiKey = '';
   for (const ide of SUPPORTED_IDES) {
     if (fs.existsSync(ide.configPath)) {
@@ -144,8 +145,6 @@ export async function runInit() {
   }
   success('API key configured');
 
-  // ─── Step 2: Database directory ─────────────────────────────────────────────
-
   log('');
   log('Step 2/3: Database Setup');
   log('────────────────────────');
@@ -156,8 +155,6 @@ export async function runInit() {
   } else {
     info(`Data directory already exists: ${DATA_DIR}`);
   }
-
-  // ─── Step 3: IDE selection ───────────────────────────────────────────────────
 
   log('');
   log('Step 3/3: IDE Configuration');
@@ -192,14 +189,7 @@ export async function runInit() {
     selectedIdes = indices.map((i) => SUPPORTED_IDES[i]);
   }
 
-  // Detect install method once
-  const { execSync } = require('child_process');
-  let useGlobalBinary = false;
-  try {
-    execSync('antigravity-mem --version', { stdio: 'ignore' });
-    useGlobalBinary = true;
-  } catch { /* not globally installed */ }
-
+  const useGlobalBinary = isGlobalBinaryInstalled();
   const command = useGlobalBinary ? 'antigravity-mem' : 'npx';
   const args = useGlobalBinary ? ['mcp-serve'] : ['-y', 'antigravity-memory', 'mcp-serve'];
 
@@ -223,7 +213,21 @@ export async function runInit() {
     }
   }
 
-  // ─── Done ───────────────────────────────────────────────────────────────────
+  const protocolCandidates = [
+    path.join(__dirname, '..', '..', 'templates', 'antigravity-memory-protocol.md'),
+    path.join(__dirname, '..', 'templates', 'antigravity-memory-protocol.md'),
+    path.join(process.cwd(), 'templates', 'antigravity-memory-protocol.md'),
+  ];
+  const protocolSrc = protocolCandidates.find((p) => fs.existsSync(p));
+  const protocolDest = path.join(DATA_DIR, 'antigravity-memory-protocol.md');
+  if (protocolSrc) {
+    try {
+      fs.copyFileSync(protocolSrc, protocolDest);
+      success(`Memory protocol copied to ${protocolDest}`);
+    } catch (err: any) {
+      warn(`Could not copy memory protocol: ${err.message}`);
+    }
+  }
 
   console.log('');
   console.log('  ╔══════════════════════════════════════════════╗');
@@ -233,21 +237,31 @@ export async function runInit() {
   log('What happens now:');
   log('');
   log('  1. Run: antigravity-mem verify  (checks setup)');
-  log('  2. Restart your IDE(s)');
-  log('  3. Start coding — memory tools are auto-available');
-  log('  4. Your AI assistant can now call:');
-  log('     • memory_start_session       — begin tracking a task');
-  log('     • memory_save_note           — capture prompt/response pairs');
-  log('     • memory_observe             — record code changes');
-  log('     • memory_end_session         — summarize & compress');
-  log('     • memory_get_context         — load past session knowledge');
+  log('  2. Restart Antigravity IDE');
+  log('  3. Give the agent the memory protocol (tools are NOT automatic)');
+  log('');
+  warn('IMPORTANT: MCP tools do not auto-run. The agent must call them.');
+  log('');
+  log('  Required agent protocol each session:');
+  log('     1. memory_get_context        — recall prior work (START)');
+  log('     2. memory_get_or_start_session');
+  log('     3. memory_save_note          — after significant changes');
+  log('     4. memory_end_session        — when the task is done');
+  log('');
+  log('  Also available:');
+  log('     • memory_observe             — record code changes (async compress)');
   log('     • memory_list_sessions       — browse session history');
   log('     • memory_cleanup_sessions    — prune stale/old sessions');
   log('     • memory_delete_session      — remove a specific session');
   log('');
+  if (fs.existsSync(protocolDest)) {
+    log(`  Protocol file: ${protocolDest}`);
+    log('  Paste/attach it into Antigravity agent instructions if supported.');
+  }
+  log('  Full docs: docs/MEMORY_PROTOCOL.md (in the package repo)');
   log(`  Memory database: ${DB_PATH}`);
   console.log('');
-  log('🧠 Never lose coding context again!');
+  log('Never lose coding context again — if the agent follows the protocol.');
   console.log('');
 }
 

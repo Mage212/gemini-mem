@@ -12,7 +12,7 @@ const program = new Command();
 program
   .name('antigravity-mem')
   .description('Persistent memory layer for Antigravity IDE / Gemini CLI')
-  .version('0.2.0');
+  .version('0.3.0');
 
 // ─── Init command (no DB needed) ─────────────────────────────────────────────
 

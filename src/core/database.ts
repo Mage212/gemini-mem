@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
+import { normalizeProjectPath } from './paths';
 
 export type SessionStatus = 'active' | 'summarized' | 'completed';
 
@@ -80,9 +80,10 @@ export class MemoryDatabase {
   }
 
   createSession(projectPath: string, userPrompt?: string): Session {
+    const normalizedPath = normalizeProjectPath(projectPath);
     const session: Session = {
       id: `sess_${uuidv4()}`,
-      project_path: projectPath,
+      project_path: normalizedPath,
       user_prompt: userPrompt,
       summary: undefined,
       created_at: Date.now(),
@@ -103,7 +104,7 @@ export class MemoryDatabase {
     return session;
   }
 
-  endSession(sessionId: string, summary?: string, status: SessionStatus = 'summarized') {
+  endSession(sessionId: string, summary?: string, status: SessionStatus = 'completed') {
     const endedAt = Date.now();
     this.db.prepare(
       `UPDATE sessions SET summary = COALESCE(?, summary), status = ?, ended_at = ? WHERE id = ?`
@@ -157,6 +158,7 @@ export class MemoryDatabase {
     compressedTokens: number
   ) {
     const tokensSaved = Math.max(originalTokens - compressedTokens, 0);
+    const obs = this.getObservation(observationId);
     this.db.prepare(
       `UPDATE observations
        SET compressed_data = ?,
@@ -167,12 +169,27 @@ export class MemoryDatabase {
        WHERE id = ?`
     ).run(compressedData, originalTokens, compressedTokens, tokensSaved, observationId);
 
+    if (obs?.session_id && tokensSaved > 0) {
+      this.db.prepare(
+        `UPDATE sessions SET tokens_saved = tokens_saved + ? WHERE id = ?`
+      ).run(tokensSaved, obs.session_id);
+    }
+
     console.error('[DB] Marked observation as compressed', {
       observationId,
       originalTokens,
       compressedTokens,
       tokensSaved
     });
+  }
+
+  markObservationFailed(observationId: string, reason?: string) {
+    this.db.prepare(
+      `UPDATE observations
+       SET status = 'failed',
+           compressed_data = COALESCE(compressed_data, ?)
+       WHERE id = ?`
+    ).run(reason ? `compression failed: ${reason}` : 'compression failed', observationId);
   }
 
   getSession(sessionId: string): Session | undefined {
@@ -239,18 +256,21 @@ export class MemoryDatabase {
   }
 
   getRecentSessions(projectPath: string, limit = 5): Session[] {
+    const normalizedPath = normalizeProjectPath(projectPath);
     return this.db.prepare(
       `SELECT * FROM sessions WHERE project_path = ? AND status != 'active' ORDER BY created_at DESC LIMIT ?`
-    ).all(projectPath, limit) as Session[];
+    ).all(normalizedPath, limit) as Session[];
   }
 
   getActiveSession(projectPath: string): Session | undefined {
+    const normalizedPath = normalizeProjectPath(projectPath);
     return this.db.prepare(
       `SELECT * FROM sessions WHERE project_path = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1`
-    ).get(projectPath) as Session | undefined;
+    ).get(normalizedPath) as Session | undefined;
   }
 
   searchSessions(projectPath: string, query: string, limit = 5): SearchResult[] {
+    const normalizedPath = normalizeProjectPath(projectPath);
     const searchQuery = this.buildSearchQuery(query);
     if (!searchQuery) return [];
 
@@ -261,11 +281,12 @@ export class MemoryDatabase {
        WHERE fts.sessions_fts MATCH ?
          AND s.project_path = ?
        ORDER BY fts.rank LIMIT ?`
-    ).all(searchQuery, projectPath, limit) as SearchResult[];
+    ).all(searchQuery, normalizedPath, limit) as SearchResult[];
     return results;
   }
 
   searchNotes(projectPath: string, query: string, limit = 5): NoteWithSession[] {
+    const normalizedPath = normalizeProjectPath(projectPath);
     const searchQuery = this.buildSearchQuery(query);
     if (!searchQuery) return [];
 
@@ -277,15 +298,16 @@ export class MemoryDatabase {
       WHERE fts.notes_fts MATCH ?
         AND s.project_path = ?
       ORDER BY fts.rank LIMIT ?
-    `).all(searchQuery, projectPath, limit) as NoteWithSession[];
+    `).all(searchQuery, normalizedPath, limit) as NoteWithSession[];
   }
 
   closeStaleActiveSessions(projectPath: string, thresholdMs = MemoryDatabase.STALE_SESSION_MS): number {
+    const normalizedPath = normalizeProjectPath(projectPath);
     const cutoff = Date.now() - thresholdMs;
     const result = this.db.prepare(
       `UPDATE sessions SET status = 'completed', ended_at = ?
        WHERE project_path = ? AND status = 'active' AND created_at < ?`
-    ).run(Date.now(), projectPath, cutoff);
+    ).run(Date.now(), normalizedPath, cutoff);
     return result.changes as number;
   }
 
@@ -295,10 +317,11 @@ export class MemoryDatabase {
   }
 
   pruneSessions(projectPath: string, olderThanDays: number): number {
+    const normalizedPath = normalizeProjectPath(projectPath);
     const cutoff = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
     const result = this.db.prepare(
       `DELETE FROM sessions WHERE project_path = ? AND status != 'active' AND created_at < ?`
-    ).run(projectPath, cutoff);
+    ).run(normalizedPath, cutoff);
     return result.changes as number;
   }
 
@@ -362,12 +385,6 @@ export class MemoryDatabase {
         timestamp INTEGER NOT NULL
       );
 
-      CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
-        observation_id UNINDEXED,
-        function_name,
-        compressed_data
-      );
-
       CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
         note_id UNINDEXED,
         user_prompt,
@@ -386,11 +403,6 @@ export class MemoryDatabase {
         VALUES (new.id, new.user_prompt, new.summary);
       END;
 
-      CREATE TRIGGER IF NOT EXISTS observations_fts_insert AFTER INSERT ON observations BEGIN
-        INSERT INTO observations_fts(observation_id, function_name, compressed_data)
-        VALUES (new.id, new.function_name, new.compressed_data);
-      END;
-
       CREATE TRIGGER IF NOT EXISTS notes_fts_insert AFTER INSERT ON notes BEGIN
         INSERT INTO notes_fts(note_id, user_prompt, ai_response, annotation)
         VALUES (new.id, new.user_prompt, new.ai_response, new.annotation);
@@ -400,15 +412,23 @@ export class MemoryDatabase {
         DELETE FROM sessions_fts WHERE session_id = old.id;
       END;
 
-      CREATE TRIGGER IF NOT EXISTS observations_fts_delete AFTER DELETE ON observations BEGIN
-        DELETE FROM observations_fts WHERE observation_id = old.id;
-      END;
-
       CREATE TRIGGER IF NOT EXISTS notes_fts_delete AFTER DELETE ON notes BEGIN
         DELETE FROM notes_fts WHERE note_id = old.id;
       END;
     `;
 
     this.db.exec(schema);
+    this.dropDeadObservationsFts();
+  }
+
+  /** Remove unused observations_fts left from earlier schema versions. */
+  private dropDeadObservationsFts() {
+    try {
+      this.db.exec(`DROP TRIGGER IF EXISTS observations_fts_insert`);
+      this.db.exec(`DROP TRIGGER IF EXISTS observations_fts_delete`);
+      this.db.exec(`DROP TABLE IF EXISTS observations_fts`);
+    } catch (err: any) {
+      console.error('[DB] Failed to drop observations_fts:', err?.message || err);
+    }
   }
 }

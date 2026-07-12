@@ -9,45 +9,24 @@ npm install -g antigravity-memory
 antigravity-mem init
 ```
 
-That's it — 2 commands. [See Quick Start for details.](#quick-start)
+Fork maintained at: https://github.com/Mage212/gemini-mem
 
 ---
 
-Inspired by [Claude-Mem](https://github.com/thedotmack/claude-mem) ([docs](https://docs.claude-mem.ai/introduction)), which brings persistent memory to Claude Code. We asked: **what if Antigravity IDE users had the same superpower?** Claude-Mem works through Claude Code's lifecycle hooks — Antigravity doesn't have those yet, so we built an MCP-based approach that gives Gemini the same long-term memory through tool calls.
+Inspired by [Claude-Mem](https://github.com/thedotmack/claude-mem). Claude-Mem uses lifecycle hooks; Antigravity does not expose those yet, so this project uses **MCP tools** that Gemini must call explicitly.
 
-## The Problem
+## Important: pull-model memory
 
-Every time you start a new chat in Antigravity IDE, Gemini has **zero memory** of your previous sessions. You waste time re-explaining your codebase, architecture decisions, and what you already built.
+MCP tools are **available** after setup, but they are **not automatic**.
 
-**Without memory:**
-```
-Day 1: "Build a login page" → Gemini builds it ✅
-Day 2: "Add forgot password" → Gemini: "What login page?" 😤
-```
+Each session the agent must:
 
-**With Antigravity Memory:**
-```
-Day 1: "Build a login page" → Gemini builds it, memory captures it ✅
-Day 2: "Add forgot password" → Gemini: "I'll add that to LoginForm.tsx
-        we built yesterday, below the password field" 🧠
-```
+1. `memory_get_context` — recall prior work
+2. `memory_get_or_start_session`
+3. `memory_save_note` — after significant changes
+4. `memory_end_session` — when the task is done
 
-## Why This Matters — The Context Loss Problem
-
-As your project grows, so does the context your AI needs. But research shows that **all LLMs lose accuracy as context length increases** — even models with massive context windows.
-
-![Context Loss Chart — OpenAI MRCR Benchmark](assets/context-loss-chart.png)
-*Source: [Context Arena](https://context.ai) — OpenAI MRCR benchmark (8-needle, hard). Every model's accuracy drops as the context window fills up.*
-
-**The key insight:** Gemini supports up to 2M tokens — the largest context window of any model. But even Gemini's accuracy drops from ~93% at 10K tokens down to ~25% at 1M tokens. Dumping your entire project history into the context window doesn't work.
-
-**Our approach:** Instead of stuffing raw history into the prompt, Antigravity Memory **compresses and summarizes** past sessions using Gemini, then retrieves only the relevant context. This keeps the effective context small and accurate — you get the memory without the context loss.
-
-| Approach | Context Used | Accuracy |
-|----------|-------------|----------|
-| No memory (start fresh each session) | ~0 tokens | No continuity |
-| Dump full history into prompt | 500K+ tokens | Severe accuracy loss |
-| **Antigravity Memory (compressed + relevant)** | **~2K-10K tokens** | **High accuracy + full continuity** |
+See [docs/MEMORY_PROTOCOL.md](docs/MEMORY_PROTOCOL.md). `init` copies the protocol to `~/.antigravity-mem/antigravity-memory-protocol.md`.
 
 ## Quick Start
 
@@ -59,68 +38,50 @@ antigravity-mem init
 
 ### Option B: From Source
 ```bash
-git clone https://github.com/keyut-shah/gemini-mem.git
-cd antigravity-memory
+git clone https://github.com/Mage212/gemini-mem.git
+cd gemini-mem
 npm install && npm run build
 npm link
 antigravity-mem init
 ```
 
 The setup wizard will:
+
 1. Ask for your free Gemini API key ([get one here](https://aistudio.google.com/apikey))
 2. Create a local SQLite database at `~/.antigravity-mem/memory.db`
 3. Write the MCP config to `~/.gemini/antigravity/mcp_config.json`
+4. Install the memory protocol checklist for the agent
 
 Then:
+
 ```bash
-antigravity-mem verify    # optional — confirm everything works
+antigravity-mem verify
 ```
 
-Restart Antigravity IDE. Your AI assistant now has memory.
+Restart Antigravity IDE.
 
 ## How It Works
 
-```
-┌─────────────────────────────────────────────────────┐
-│                  Antigravity IDE                     │
-│                                                     │
-│  User: "Add dark mode toggle"                       │
-│                    ↓                                 │
-│  Gemini calls memory_get_context                    │
-│    → retrieves past sessions, notes, decisions      │
-│                    ↓                                 │
-│  Gemini: "I see we built the Settings page last     │
-│   session with a ThemeProvider. I'll add the toggle  │
-│   to SettingsPanel.tsx..."                           │
-│                    ↓                                 │
-│  Gemini calls memory_save_note                      │
-│    → captures what it did for future sessions       │
-│                    ↓                                 │
-│  Gemini calls memory_end_session                    │
-│    → Gemini compresses & summarizes everything      │
-└─────────────────────────────────────────────────────┘
-                     ↓
-┌─────────────────────────────────────────────────────┐
-│              ~/.antigravity-mem/memory.db            │
-│                                                     │
-│  Sessions → Notes → Observations → Summaries        │
-│  Full-text search (FTS5) across all history         │
-│  Token-efficient compressed storage                 │
-└─────────────────────────────────────────────────────┘
-```
+- **Storage:** local SQLite + FTS5 (`~/.antigravity-mem/memory.db`)
+- **Scope:** sessions are partitioned by normalized absolute `projectPath`
+- **Compression / summary:** Gemini API (`gemini-2.5-flash-lite` by default)
+- **MCP:** stdio server started by Antigravity via MCP config
+- **Observation compression:** queued asynchronously (does not block tool calls)
 
 ## MCP Tools
 
-Once installed, Gemini in Antigravity IDE gets these tools automatically:
-
 | Tool | When to Use | What It Does |
 |------|-------------|-------------|
-| `memory_start_session` | Start of a task | Creates a session to track work |
-| `memory_save_note` | After each significant action | Captures files changed, decisions, trade-offs |
-| `memory_observe` | On code changes | Records + compresses observations via Gemini |
-| `memory_get_context` | Start of a conversation | Loads all relevant past knowledge |
-| `memory_end_session` | Task complete | Summarizes entire session via Gemini |
-| `memory_list_sessions` | Anytime | Browse recent session history |
+| `memory_get_context` | Start of a conversation | Loads relevant past knowledge |
+| `memory_get_or_start_session` | Start of a task | Returns or creates active session |
+| `memory_start_session` | Start of a task | Creates a session |
+| `memory_save_note` | After significant actions | Captures files/decisions |
+| `memory_observe` | On code changes | Records + queues Gemini compression |
+| `memory_end_session` | Task complete | Summarizes session via Gemini |
+| `memory_list_sessions` | Anytime | Browse recent sessions |
+| `memory_session_status` | Anytime | Inspect a session |
+| `memory_cleanup_sessions` | Maintenance | Prune/close stale sessions |
+| `memory_delete_session` | Maintenance | Delete a session |
 
 ## CLI Commands
 
@@ -128,69 +89,47 @@ Once installed, Gemini in Antigravity IDE gets these tools automatically:
 antigravity-mem init         # Interactive setup wizard
 antigravity-mem verify       # Validate setup (config, DB, API key)
 antigravity-mem stats        # View memory statistics
-antigravity-mem mcp-serve    # Start MCP server (used by IDE internally)
+antigravity-mem mcp-serve    # Start MCP server (used by IDE)
 antigravity-mem context -p . # Preview context block for a project
 ```
+
+## Environment
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `GEMINI_API_KEY` | Gemini API access | required (via init) |
+| `GEMINI_MODEL` | Model override | `gemini-2.5-flash-lite` |
+| `ANTIGRAVITY_MEM_DB` | Database path | `~/.antigravity-mem/memory.db` |
+| `MOCK_GEMINI` | Use mock Gemini responses | unset |
+| `MOCK_GEMINI_FALLBACK` | Opt-in mock on API failure (`1`) | unset (errors surface to agent) |
 
 ## Architecture
 
 ```
-antigravity-memory/
-├── src/
-│   ├── mcp/server.ts           # MCP server — 6 tools over stdio
-│   ├── cli/index.ts            # CLI — init, verify, stats, mcp-serve
-│   ├── cli/init.ts             # Setup wizard — writes MCP config
-│   ├── core/database.ts        # SQLite + FTS5 full-text search
-│   ├── core/context-manager.ts # Builds context from sessions + notes
-│   ├── gemini/client.ts        # Gemini API — compression & summarization
-│   └── gemini/summarizer.ts    # Session summarization with quality checks
-├── package.json
-└── tsconfig.json
+src/
+├── mcp/server.ts              # MCP server — tools over stdio (primary)
+├── cli/                       # init, verify, stats, mcp-serve
+├── core/database.ts           # SQLite + FTS5
+├── core/context-manager.ts    # Builds context (includes active session)
+├── core/compression-queue.ts  # Async observation compression
+├── core/paths.ts              # projectPath normalization
+├── gemini/client.ts           # Gemini compression & summarization
+├── gemini/summarizer.ts       # Session summarization (owns endSession)
+└── api/server.ts              # Experimental/legacy local HTTP API
 ```
 
-**Key design decisions:**
-- **100% local** — SQLite database, no cloud, no telemetry
-- **MCP over stdio** — standard protocol, Antigravity auto-discovers tools
-- **Gemini free-tier** — compression + summarization at zero cost
-- **FTS5 search** — finds relevant past sessions by keyword matching
-- **Token-efficient** — compresses verbose observations to save context window
+## Experimental HTTP API
 
-## Tech Stack
+`npm run api` starts a localhost HTTP API + simple UI for debugging.
+This path is **experimental/legacy**. Prefer MCP for Antigravity.
 
-| Component | Technology |
-|-----------|-----------|
-| Runtime | Node.js >= 18 |
-| Database | SQLite via better-sqlite3 |
-| Search | FTS5 full-text search |
-| AI | Gemini 2.5 Flash Lite (free tier) |
-| Protocol | MCP (Model Context Protocol) |
-| CLI | Commander.js |
-| Validation | Zod |
-| Language | TypeScript |
+## Development
 
-## Environment
-
-| Variable | Purpose | Set By |
-|----------|---------|--------|
-| `GEMINI_API_KEY` | Gemini API access | MCP config (via init wizard) |
-| `GEMINI_MODEL` | Model override | MCP config (default: gemini-2.5-flash-lite) |
-| `ANTIGRAVITY_MEM_DB` | Database path | MCP config (default: ~/.antigravity-mem/memory.db) |
-
-## How This Compares to Claude-Mem
-
-| | Claude-Mem | Antigravity Memory |
-|---|---|---|
-| **Target IDE** | Claude Code | Antigravity IDE |
-| **AI Model** | Claude (Anthropic) | Gemini (Google) |
-| **Memory Capture** | Automatic via lifecycle hooks | Automatic via MCP tool calls |
-| **Context Injection** | Automatic (hook-based) | Automatic (Gemini calls `memory_get_context`) |
-| **Storage** | SQLite + FTS | SQLite + FTS5 |
-| **Compression** | Claude-powered | Gemini-powered |
-| **Cost** | Requires Claude API | Free (Gemini free tier) |
-| **Context Window** | 200K tokens | 2M tokens |
-| **Install** | Plugin system | npm package + MCP config |
-
-**Key difference:** Claude-Mem hooks into Claude Code's internal lifecycle (tool calls, results). Antigravity doesn't expose hooks yet, so we use MCP tools that Gemini calls directly — the AI is its own memory manager. When Antigravity adds lifecycle hooks, this can become fully automatic.
+```bash
+npm install
+npm run build
+npm test
+```
 
 ## License
 
