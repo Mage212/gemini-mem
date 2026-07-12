@@ -148,7 +148,7 @@ server.tool(
 
 server.tool(
   'memory_end_session',
-  'End and summarize a coding session. This generates a rich summary using Gemini from all saved notes and observations. Call this when the user is done with a task. IMPORTANT: Make sure you called memory_save_note at least once BEFORE calling this, otherwise the summary will be empty.',
+  'End and summarize a coding session. Waits briefly for any queued observation compressions, then generates a rich summary using Gemini from saved notes and observations. Call this when the user is done with a task. IMPORTANT: Make sure you called memory_save_note at least once BEFORE calling this, otherwise the summary may be empty.',
   {
     sessionId: z.string().describe('The session ID to finalize')
   },
@@ -158,9 +158,33 @@ server.tool(
       if (!session) {
         return { content: [{ type: 'text' as const, text: `Error: session not found: ${sessionId}` }], isError: true };
       }
+
+      const drain = await compressionQueue.drain(60_000);
+      const countsBefore = db.getObservationCounts(sessionId);
+      const failed = countsBefore.observations.failed ?? 0;
+
       // SessionSummarizer owns endSession (status=completed). Do not call endSession again here.
       const summary = await summarizer.summarize(sessionId);
-      return { content: [{ type: 'text' as const, text: `Session summarized and saved.\n\nSummary:\n${summary}` }] };
+
+      const notes: string[] = [];
+      if (!drain.drained) {
+        notes.push(
+          `Warning: compression queue did not fully drain before summarize (${drain.remaining} still pending after ${drain.waitedMs}ms). Notes are still included; some observations may lack compression.`
+        );
+      }
+      if (failed > 0) {
+        notes.push(
+          `Warning: ${failed} observation compression(s) failed. Check memory_session_status for details; notes still contribute to the summary.`
+        );
+      }
+
+      const suffix = notes.length > 0 ? `\n\n${notes.join('\n')}` : '';
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Session summarized and saved.\n\nSummary:\n${summary}${suffix}`
+        }]
+      };
     } catch (err: any) {
       console.error('[MCP] memory_end_session error:', err.message);
       return {
@@ -173,7 +197,7 @@ server.tool(
 
 server.tool(
   'memory_session_status',
-  'Get the current status/counts for a session (observations per status, notes count, summary if present).',
+  'Get the current status/counts for a session (observations per status including failed compressions, notes count, summary if present). Use this to check whether background compression succeeded.',
   {
     sessionId: z.string().describe('The session ID to inspect')
   },
@@ -185,7 +209,11 @@ server.tool(
       }
       const counts = db.getObservationCounts(sessionId);
       const summary = session.summary || '(no summary yet)';
-      const statusText = `Session ${sessionId}\nStatus: ${session.status}\nObservations: ${JSON.stringify(counts.observations)}\nNotes: ${counts.notes}\nSummary: ${summary}`;
+      const failed = counts.observations.failed ?? 0;
+      const failedHint = failed > 0
+        ? `\nNote: ${failed} compression(s) failed — Gemini API error was recorded on those observations; memory_save_note content is unaffected.`
+        : '';
+      const statusText = `Session ${sessionId}\nStatus: ${session.status}\nObservations: ${JSON.stringify(counts.observations)}\nNotes: ${counts.notes}\nSummary: ${summary}${failedHint}`;
       return { content: [{ type: 'text' as const, text: statusText }] };
     } catch (err: any) {
       console.error('[MCP] memory_session_status error:', err.message);
@@ -196,7 +224,7 @@ server.tool(
 
 server.tool(
   'memory_observe',
-  'Record a coding action/observation in the current session. Use this when you make a significant change (create file, modify component, fix bug, etc.). Compression is queued in the background and does not block this tool.',
+  'Record a coding action/observation in the current session. Use this when you make a significant change (create file, modify component, fix bug, etc.). Compression is queued in the background and does not block this tool. If compression fails later, the observation is marked failed — check with memory_session_status. Prefer memory_save_note for durable context.',
   {
     sessionId: z.string().describe('The active session ID'),
     action: z.string().describe('What action was performed (e.g., "created file", "modified component", "fixed bug")'),
@@ -222,7 +250,7 @@ server.tool(
         return {
           content: [{
             type: 'text' as const,
-            text: `Observation recorded (${obs.id}): ${action}. Compression queued (position ${position}).`
+            text: `Observation recorded (${obs.id}): ${action}. Compression queued (position ${position}). Failures appear as status=failed via memory_session_status.`
           }]
         };
       }

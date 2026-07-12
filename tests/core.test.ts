@@ -118,4 +118,31 @@ describe('CompressionQueue', () => {
     db.close();
     delete process.env.MOCK_GEMINI;
   });
+
+  it('drain waits until queued compression finishes', async () => {
+    process.env.MOCK_GEMINI = '1';
+    const dbFile = tempDbPath();
+    dbPaths.push(dbFile);
+    const db = new MemoryDatabase(dbFile);
+    const gemini = new GeminiClient('unused');
+    const queue = new CompressionQueue(db, gemini, 50);
+    const session = db.createSession('/tmp/drain-app');
+    const obs = db.saveObservation(session.id, 'edit', { details: 'drain me' });
+    db.updateObservationResult(obs.id, 'drain me');
+
+    queue.enqueue({
+      observationId: obs.id,
+      functionName: 'edit',
+      functionArgs: JSON.stringify({ details: 'drain me' }),
+      functionResult: 'drain me'
+    });
+
+    const result = await queue.drain(5_000);
+    expect(result.drained).toBe(true);
+    expect(result.remaining).toBe(0);
+    expect(db.getObservation(obs.id)!.status).toBe('compressed');
+    queue.stop();
+    db.close();
+    delete process.env.MOCK_GEMINI;
+  });
 });

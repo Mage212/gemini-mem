@@ -18,9 +18,11 @@ The agent must follow this protocol every session.
 3. **During significant work**
    - After meaningful changes, call `memory_save_note` with concrete file paths, decisions, and trade-offs.
    - Optionally call `memory_observe` for discrete coding actions (compression runs in the background).
+   - If you need to know whether compression succeeded, call `memory_session_status` (look for `failed`).
 
 4. **End of task**
-   - Call `memory_end_session` with the `sessionId` so Gemini can summarize the session for future retrieval.
+   - Call `memory_end_session` with the `sessionId`.
+   - The server drains pending compressions (up to ~60s) before summarizing via Gemini.
 
 ## Project path rules
 
@@ -32,4 +34,5 @@ The agent must follow this protocol every session.
 
 - Memory is a **pull model**: if you skip `memory_get_context`, the session starts with zero long-term memory.
 - If you skip `memory_save_note` / `memory_end_session`, there will be little to retrieve next time.
-- Gemini API failures are returned as tool errors (no silent mock summaries in production).
+- Gemini API failures are returned as tool errors on summarize (no silent mock summaries in production).
+- Background compression failures mark observations as `failed` — check `memory_session_status`.

@@ -139,8 +139,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/summarize') {
       const { sessionId } = await parseBody(req);
       if (!sessionId) return send(res, 400, { error: 'sessionId required' });
+      const drain = await compressionQueue.drain(60_000);
       const summary = await summarizer.summarize(sessionId);
-      return send(res, 200, { summary });
+      return send(res, 200, { summary, compressionDrain: drain });
     }
 
     if (req.method === 'GET' && url.pathname === '/context') {

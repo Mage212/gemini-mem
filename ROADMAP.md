@@ -10,9 +10,11 @@
 - Default model aligned with init: `gemini-2.5-flash-lite`
 - Agent memory protocol docs + init checklist
 - Active session included in `memory_get_context`
-- Removed unused `observations_fts`
+- Removed unused `observations_fts` (auto-DROP on DB open for existing installs)
 - Session-level `tokens_saved` aggregation
 - Vitest unit tests + GitHub Actions CI
+- Drain compression queue before `memory_end_session` / summarize
+- Document compression failure visibility via `memory_session_status`
 
 ## Near-term
 

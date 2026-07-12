@@ -8,6 +8,12 @@ export type CompressionJob = {
   functionResult?: string;
 };
 
+export type DrainResult = {
+  drained: boolean;
+  remaining: number;
+  waitedMs: number;
+};
+
 function estimateTokens(text: string): number {
   if (!text) return 0;
   return Math.ceil(text.length / 4);
@@ -54,6 +60,39 @@ export class CompressionQueue {
 
   get pending(): number {
     return this.queue.length;
+  }
+
+  get busy(): boolean {
+    return this.processing || this.queue.length > 0;
+  }
+
+  /**
+   * Wait until the queue is idle (no pending jobs and nothing in-flight),
+   * or until timeoutMs elapses. Used before session summarization so
+   * freshly recorded observations are compressed when possible.
+   */
+  async drain(timeoutMs = 60_000): Promise<DrainResult> {
+    const started = Date.now();
+    this.start();
+
+    while (this.busy) {
+      // Keep pumping while waiting so we do not depend only on the poll timer.
+      void this.processNext();
+      if (Date.now() - started >= timeoutMs) {
+        return {
+          drained: false,
+          remaining: this.queue.length + (this.processing ? 1 : 0),
+          waitedMs: Date.now() - started
+        };
+      }
+      await new Promise((r) => setTimeout(r, Math.min(50, this.pollMs)));
+    }
+
+    return {
+      drained: true,
+      remaining: 0,
+      waitedMs: Date.now() - started
+    };
   }
 
   private async processNext() {

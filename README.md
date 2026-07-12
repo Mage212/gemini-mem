@@ -66,7 +66,12 @@ Restart Antigravity IDE.
 - **Scope:** sessions are partitioned by normalized absolute `projectPath`
 - **Compression / summary:** Gemini API (`gemini-2.5-flash-lite` by default)
 - **MCP:** stdio server started by Antigravity via MCP config
-- **Observation compression:** queued asynchronously (does not block tool calls)
+- **Observation compression:** queued asynchronously (does not block tool calls); `memory_end_session` drains the queue (up to 60s) before summarizing
+- **Compression failures:** marked as observation `status=failed` (not silent mock). Inspect with `memory_session_status`. Prefer `memory_save_note` for durable context.
+
+### Existing databases
+
+On startup the DB layer **automatically drops** the unused legacy `observations_fts` virtual table and its triggers if they still exist from older versions. No manual migration step is required. Sessions/notes FTS indexes are unchanged.
 
 ## MCP Tools
 

@@ -15,7 +15,7 @@ export type { BuildContextOptions } from './core/context-manager';
 
 export { normalizeProjectPath } from './core/paths';
 export { CompressionQueue } from './core/compression-queue';
-export type { CompressionJob } from './core/compression-queue';
+export type { CompressionJob, DrainResult } from './core/compression-queue';
 
 export { GeminiClient } from './gemini/client';
 export type { CompressInput } from './gemini/client';
