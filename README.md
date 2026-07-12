@@ -11,6 +11,8 @@ antigravity-mem init
 
 Fork maintained at: https://github.com/Mage212/gemini-mem
 
+**Dev / agent handoff:** see [docs/HANDOFF.md](docs/HANDOFF.md) and [AGENTS.md](AGENTS.md) for the full Sprint 1–2 work log, remotes, and constraints.
+
 ---
 
 Inspired by [Claude-Mem](https://github.com/thedotmack/claude-mem). Claude-Mem uses lifecycle hooks; Antigravity does not expose those yet, so this project uses **MCP tools** that Gemini must call explicitly.
