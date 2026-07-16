@@ -1,6 +1,6 @@
 {
   "name": "antigravity-memory",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Persistent memory layer for Antigravity IDE via MCP — never lose context across sessions",
   "author": "Keyut Shah",
   "license": "MIT",
