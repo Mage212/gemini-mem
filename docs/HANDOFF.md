@@ -5,15 +5,18 @@
 **Дата handoff:** 2026-07-12  
 **Форк:** https://github.com/Mage212/gemini-mem  
 **Локальный путь (на машине автора):** `/Users/vadimmitroshkin/coding_projects/mcp/gemini-mem`  
-**Рабочая ветка:** `sprint-1/stable-mcp`  
+**Рабочая ветка:** `main` (и `sprint-1/stable-mcp` синхронизирована с ней)  
 **Последние коммиты (на момент handoff):**
-- `6af9b4d` — Stabilize Antigravity MCP memory (Sprint 1–2)
+- `484ffa2` — bump: version 0.3.1
+- `88bcf4e` — fix: replace third-party uuid package with native crypto.randomUUID to restore Node 18 compatibility
+- `1701995` — Add exhaustive HANDOFF doc for future agent sessions
 - `d5fa507` — Fix residual gaps: drain queue before summarize, document FTS drop
+- `6af9b4d` — Stabilize Antigravity MCP memory (Sprint 1–2)
 
 **Upstream (не пушить туда без запроса):** `https://github.com/keyut-shah/gemini-mem.git` (remote `upstream`)  
 **Origin (форк):** `https://github.com/Mage212/gemini-mem.git` (remote `origin`)
 
-**Статус merge:** изменения **ещё не в `main` форка**. `main` всё ещё на upstream `a8d9ccf` (v0.2.0). Теги `v0.3.0-stable-mcp` / `v0.4.0` **не созданы**.
+**Статус merge:** изменения **влиты в `main` форка**. Созданы и отправлены теги `v0.3.0` (Sprint 1–2 milestone) и `v0.3.1` (исправление Node 18).
 
 ---
 
@@ -118,8 +121,8 @@
 
 ### 4.6 Версия
 
-- package / MCP / CLI: **0.3.0**
-- repository URL в package.json → Mage212 fork
+- package / MCP / CLI: **0.3.1** (версия `0.3.0` была обновлена до `0.3.1` из-за исправления совместимости Node 18)
+- repository URL in package.json → Mage212 fork
 
 ---
 
@@ -265,15 +268,15 @@ git remote -v
 # upstream  https://github.com/keyut-shah/gemini-mem.git
 
 git branch -vv
-# main                a8d9ccf [upstream/main]  # старый upstream tip
-# sprint-1/stable-mcp d5fa507 [origin/sprint-1/stable-mcp]  # вся работа здесь
+# main                484ffa2 [origin/main]  # актуальная ветка релиза
+# sprint-1/stable-mcp 484ffa2 [origin/sprint-1/stable-mcp]  # синхронизирована с main
 ```
 
 ### Что ещё не сделано (по плану релизов)
 
-1. Merge `sprint-1/stable-mcp` → `main` (форка)
-2. Tag `v0.3.0-stable-mcp` (Sprint 1 milestone)
-3. Tag `v0.4.0` (Sprint 2 + residuals)
+1. Merge `sprint-1/stable-mcp` → `main` (форка) — **Выполнено**
+2. Tag `v0.3.0` (Sprint 1 milestone) — **Выполнено**
+3. Tag `v0.3.1` (Sprint 2 + residuals + Node 18 fix) — **Выполнено**
 4. Опционально: PR в upstream (только если пользователь попросит)
 
 ---
