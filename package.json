@@ -56,7 +56,6 @@
     "better-sqlite3": "^12.6.2",
     "commander": "^12.1.0",
     "dotenv": "^16.4.5",
-    "uuid": "^11.0.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {
