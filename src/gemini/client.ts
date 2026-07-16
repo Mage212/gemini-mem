@@ -133,9 +133,22 @@ export class GeminiClient {
     const model = this.client.getGenerativeModel({ model: this.modelName });
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig
+      generationConfig: {
+        ...generationConfig,
+        ...({
+          thinkingConfig: {
+            thinkingLevel: 'MINIMAL'
+          }
+        } as any)
+      }
     });
-    const text = result.response.text();
+
+    const parts = result.response.candidates?.[0]?.content?.parts || [];
+    const cleanParts = parts.filter((part: any) => !part.thought);
+    const text = cleanParts.length > 0
+      ? cleanParts.map((part: any) => part.text || '').join('')
+      : result.response.text();
+
     console.error('[Gemini] response received', { responseLength: text.length });
     return text;
   }
