@@ -66,7 +66,7 @@ Restart Antigravity IDE.
 
 - **Storage:** local SQLite + FTS5 (`~/.antigravity-mem/memory.db`)
 - **Scope:** sessions are partitioned by normalized absolute `projectPath`
-- **Compression / summary:** Gemini API (`gemini-2.5-flash-lite` by default)
+- **Compression / summary:** Configurable LLM Backend (`agy` CLI, Gemini REST API, or Automatic Fallback)
 - **MCP:** stdio server started by Antigravity via MCP config
 - **Observation compression:** queued asynchronously (does not block tool calls); `memory_end_session` drains the queue (up to 60s) before summarizing
 - **Compression failures:** marked as observation `status=failed` (not silent mock). Inspect with `memory_session_status`. Prefer `memory_save_note` for durable context.
@@ -83,8 +83,8 @@ On startup the DB layer **automatically drops** the unused legacy `observations_
 | `memory_get_or_start_session` | Start of a task | Returns or creates active session |
 | `memory_start_session` | Start of a task | Creates a session |
 | `memory_save_note` | After significant actions | Captures files/decisions |
-| `memory_observe` | On code changes | Records + queues Gemini compression |
-| `memory_end_session` | Task complete | Summarizes session via Gemini |
+| `memory_observe` | On code changes | Records + queues LLM compression |
+| `memory_end_session` | Task complete | Summarizes session via LLM |
 | `memory_list_sessions` | Anytime | Browse recent sessions |
 | `memory_session_status` | Anytime | Inspect a session |
 | `memory_cleanup_sessions` | Maintenance | Prune/close stale sessions |
@@ -104,10 +104,14 @@ antigravity-mem context -p . # Preview context block for a project
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `GEMINI_API_KEY` | Gemini API access | required (via init) |
-| `GEMINI_MODEL` | Model override | `gemini-2.5-flash-lite` |
+| `LLM_PROVIDER` | Execution backend (`auto`, `agy`, `gemini-api`, `mock`) | `auto` (AGY primary with Gemini API fallback) |
+| `AGY_PATH` | Path to `agy` CLI binary | `agy` |
+| `AGY_MODEL` | Optional model flag for `agy` CLI | unset |
+| `AGY_TIMEOUT_MS` | Timeout for `agy -p` CLI call in ms | `60000` |
+| `GEMINI_API_KEY` | Direct Gemini API access | required when using `LLM_PROVIDER=gemini-api` |
+| `GEMINI_MODEL` | Model override for direct API | `gemini-2.5-flash-lite` |
 | `ANTIGRAVITY_MEM_DB` | Database path | `~/.antigravity-mem/memory.db` |
-| `MOCK_GEMINI` | Use mock Gemini responses | unset |
+| `MOCK_GEMINI` | Use mock LLM responses | unset |
 | `MOCK_GEMINI_FALLBACK` | Opt-in mock on API failure (`1`) | unset (errors surface to agent) |
 
 ## Architecture
@@ -120,7 +124,12 @@ src/
 ├── core/context-manager.ts    # Builds context (includes active session)
 ├── core/compression-queue.ts  # Async observation compression
 ├── core/paths.ts              # projectPath normalization
-├── gemini/client.ts           # Gemini compression & summarization
+├── gemini/client-interface.ts # LLMClient interface & CompressInput types
+├── gemini/prompt-builder.ts   # Shared LLM prompt construction
+├── gemini/agy-client.ts       # AGY CLI adapter (subprocess integration)
+├── gemini/client.ts           # Direct Gemini REST API adapter
+├── gemini/fallback-client.ts  # Auto-fallback LLM provider wrapper
+├── gemini/factory.ts          # createLLMClient factory
 ├── gemini/summarizer.ts       # Session summarization (owns endSession)
 └── api/server.ts              # Experimental/legacy local HTTP API
 ```

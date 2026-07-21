@@ -7,30 +7,31 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-import { MemoryDatabase } from '../core/database';
-import { ContextManager } from '../core/context-manager';
-import { CompressionQueue } from '../core/compression-queue';
-import { GeminiClient } from '../gemini/client';
-import { SessionSummarizer } from '../gemini/summarizer';
+import { MemoryDatabase } from '../core/database.js';
+import { ContextManager } from '../core/context-manager.js';
+import { CompressionQueue } from '../core/compression-queue.js';
+import { LLMClient } from '../gemini/client-interface.js';
+import { createLLMClient } from '../gemini/factory.js';
+import { SessionSummarizer } from '../gemini/summarizer.js';
 
 const dbPath = process.env.ANTIGRAVITY_MEM_DB || path.join(os.homedir(), '.antigravity-mem', 'memory.db');
 console.error('[MCP] Initializing with DB:', dbPath);
-console.error('[MCP] Gemini model:', process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite');
+console.error('[MCP] LLM Provider:', process.env.LLM_PROVIDER || 'auto');
 
 let db: MemoryDatabase;
 let contextBuilder: ContextManager;
-let gemini: GeminiClient;
+let llmClient: LLMClient;
 let summarizer: SessionSummarizer;
 let compressionQueue: CompressionQueue;
 
 try {
   db = new MemoryDatabase(dbPath);
   contextBuilder = new ContextManager(db);
-  gemini = new GeminiClient();
-  summarizer = new SessionSummarizer(db, gemini);
-  compressionQueue = new CompressionQueue(db, gemini);
+  llmClient = createLLMClient();
+  summarizer = new SessionSummarizer(db, llmClient);
+  compressionQueue = new CompressionQueue(db, llmClient);
   compressionQueue.start();
-  console.error('[MCP] All modules initialized successfully');
+  console.error('[MCP] All modules initialized successfully using model:', llmClient.getModelName());
 } catch (err: any) {
   console.error('[MCP] FATAL: Failed to initialize modules:', err.message);
   process.exit(1);
@@ -148,7 +149,7 @@ server.tool(
 
 server.tool(
   'memory_end_session',
-  'End and summarize a coding session. Waits briefly for any queued observation compressions, then generates a rich summary using Gemini from saved notes and observations. Call this when the user is done with a task. IMPORTANT: Make sure you called memory_save_note at least once BEFORE calling this, otherwise the summary may be empty.',
+  'End and summarize a coding session. Waits briefly for any queued observation compressions, then generates a rich summary using LLM from saved notes and observations. Call this when the user is done with a task. IMPORTANT: Make sure you called memory_save_note at least once BEFORE calling this, otherwise the summary may be empty.',
   {
     sessionId: z.string().describe('The session ID to finalize')
   },
@@ -211,7 +212,7 @@ server.tool(
       const summary = session.summary || '(no summary yet)';
       const failed = counts.observations.failed ?? 0;
       const failedHint = failed > 0
-        ? `\nNote: ${failed} compression(s) failed — Gemini API error was recorded on those observations; memory_save_note content is unaffected.`
+        ? `\nNote: ${failed} compression(s) failed — LLM error was recorded on those observations; memory_save_note content is unaffected.`
         : '';
       const statusText = `Session ${sessionId}\nStatus: ${session.status}\nObservations: ${JSON.stringify(counts.observations)}\nNotes: ${counts.notes}\nSummary: ${summary}${failedHint}`;
       return { content: [{ type: 'text' as const, text: statusText }] };
@@ -229,7 +230,7 @@ server.tool(
     sessionId: z.string().describe('The active session ID'),
     action: z.string().describe('What action was performed (e.g., "created file", "modified component", "fixed bug")'),
     details: z.string().describe('Details of the change — files affected, what changed, why'),
-    compress: z.boolean().optional().default(true).describe('Whether to queue this for Gemini compression in the background')
+    compress: z.boolean().optional().default(true).describe('Whether to queue this for LLM compression in the background')
   },
   async ({ sessionId, action, details, compress }) => {
     try {

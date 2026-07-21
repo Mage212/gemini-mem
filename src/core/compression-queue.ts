@@ -1,5 +1,5 @@
-import { MemoryDatabase } from './database';
-import { GeminiClient } from '../gemini/client';
+import { MemoryDatabase } from './database.js';
+import { LLMClient } from '../gemini/client-interface.js';
 
 export type CompressionJob = {
   observationId: string;
@@ -21,7 +21,7 @@ function estimateTokens(text: string): number {
 
 /**
  * Background compression queue for MCP tool handlers.
- * Observations are stored immediately; Gemini compression runs asynchronously.
+ * Observations are stored immediately; LLM compression runs asynchronously.
  */
 export class CompressionQueue {
   private queue: CompressionJob[] = [];
@@ -30,7 +30,7 @@ export class CompressionQueue {
 
   constructor(
     private db: MemoryDatabase,
-    private gemini: GeminiClient,
+    private gemini: LLMClient,
     private pollMs = 200
   ) {}
 

@@ -344,4 +344,18 @@ Cursor workspace часто открыт как `coding_projects/mcp/memory-tool
 
 ---
 
+## 16. Интеграция AGY CLI в качестве переключаемого LLM Бэкенда (2026-07-21)
+
+Реализована архитектура гибкого переключения LLM провайдера для отказа от прямой зависимости от REST API `GEMINI_API_KEY` при исчерпании квот:
+
+### Изменения:
+1. **Интерфейс `LLMClient` (`src/gemini/client-interface.ts`)**: Единый контракт для генераторов.
+2. **Адаптер `AgyCliClient` (`src/gemini/agy-client.ts`)**: Обертка над CLI `agy -p "<prompt>"`. Использует системные квоты Antigravity CLI без необходимости в `GEMINI_API_KEY`.
+3. **Провайдер `FallbackLLMClient` (`src/gemini/fallback-client.ts`)**: Автоматически переключается на резервный клиент при ошибках основного.
+4. **Фабрика `createLLMClient()` (`src/gemini/factory.ts`)**: Считывает переменную `LLM_PROVIDER` (`auto`, `agy`, `gemini-api`, `mock`). По умолчанию `auto` использует `agy` с фолбэком на Direct API.
+5. **Тестовое покрытие (`tests/agy-client.test.ts`)**: Покрыты unit-тестами все режимы переключения и моков.
+
+---
+
 *Конец handoff. При существенных новых изменениях — дописывай секцию в конец этого файла или обновляй даты/коммиты в шапке.*
+

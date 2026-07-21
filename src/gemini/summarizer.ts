@@ -1,11 +1,11 @@
-import { MemoryDatabase } from '../core/database';
-import { GeminiClient } from './client';
+import { MemoryDatabase } from '../core/database.js';
+import { LLMClient } from './client-interface.js';
 
 const MIN_SUMMARY_LENGTH = 200; // characters
 const MAX_RETRIES = 2;
 
 export class SessionSummarizer {
-  constructor(private db: MemoryDatabase, private gemini: GeminiClient) {}
+  constructor(private db: MemoryDatabase, private gemini: LLMClient) {}
 
   /**
    * Summarize and close a session. This is the single owner of endSession —

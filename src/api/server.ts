@@ -9,17 +9,17 @@ import { URL } from 'url';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import { MemoryDatabase } from '../core/database';
-import { ContextManager } from '../core/context-manager';
-import { CompressionQueue } from '../core/compression-queue';
-import { GeminiClient } from '../gemini/client';
-import { SessionSummarizer } from '../gemini/summarizer';
+import { MemoryDatabase } from '../core/database.js';
+import { ContextManager } from '../core/context-manager.js';
+import { CompressionQueue } from '../core/compression-queue.js';
+import { createLLMClient } from '../gemini/factory.js';
+import { SessionSummarizer } from '../gemini/summarizer.js';
 
 dotenv.config();
 
 const db = new MemoryDatabase();
 const ctx = new ContextManager(db);
-const gemini = new GeminiClient();
+const gemini = createLLMClient();
 const summarizer = new SessionSummarizer(db, gemini);
 const compressionQueue = new CompressionQueue(db, gemini);
 compressionQueue.start();
@@ -69,7 +69,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'OPTIONS') return send(res, 200, {});
 
     if (req.method === 'GET' && url.pathname === '/health') {
-      return send(res, 200, { ok: true, mock: process.env.MOCK_GEMINI === '1' || undefined });
+      return send(res, 200, { ok: true, model: gemini.getModelName(), mock: process.env.MOCK_GEMINI === '1' || undefined });
     }
 
     if (req.method === 'POST' && url.pathname === '/session/start') {
