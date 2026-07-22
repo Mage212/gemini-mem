@@ -60,10 +60,18 @@ export class AgyCliClient implements LLMClient {
 
   private async runAgyPrompt(prompt: string, operationName: string): Promise<string> {
     const args: string[] = [];
-    if (process.env.AGY_MODEL) {
-      args.push('--model', process.env.AGY_MODEL);
+    const targetModel = process.env.AGY_MODEL || (this.modelName !== 'agy-cli' ? this.modelName : undefined);
+    if (targetModel) {
+      args.push('--model', targetModel);
     }
-    args.push('-p', prompt);
+
+    const MAX_PROMPT_LEN = 40_000;
+    let safePrompt = prompt;
+    if (prompt.length > MAX_PROMPT_LEN) {
+      console.error(`[AGY Client] Warning: Prompt length (${prompt.length}) exceeds safety limit (${MAX_PROMPT_LEN}). Truncating...`);
+      safePrompt = prompt.slice(0, MAX_PROMPT_LEN) + '\n...[truncated due to length limit]';
+    }
+    args.push('-p', safePrompt);
 
     console.error(`[AGY Client] Executing ${operationName} via CLI (${this.agyPath})...`);
 

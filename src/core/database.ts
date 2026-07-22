@@ -146,9 +146,10 @@ export class MemoryDatabase {
   }
 
   updateObservationResult(observationId: string, result: unknown) {
+    const serializedResult = typeof result === 'string' ? result : JSON.stringify(result);
     this.db.prepare(
       `UPDATE observations SET function_result = ?, status = 'captured', timestamp = ? WHERE id = ?`
-    ).run(JSON.stringify(result), Date.now(), observationId);
+    ).run(serializedResult, Date.now(), observationId);
   }
 
   markObservationCompressed(
@@ -325,12 +326,41 @@ export class MemoryDatabase {
     return result.changes as number;
   }
 
+  getStats(): {
+    sessionCount: number;
+    observationCount: number;
+    compressedCount: number;
+    noteCount: number;
+    tokensSaved: number;
+    originalTokens: number;
+    lastSessionCreatedAt?: number;
+  } {
+    const sessionCount = (this.db.prepare('SELECT COUNT(*) as c FROM sessions').get() as any)?.c ?? 0;
+    const observationCount = (this.db.prepare('SELECT COUNT(*) as c FROM observations').get() as any)?.c ?? 0;
+    const compressedCount = (this.db.prepare("SELECT COUNT(*) as c FROM observations WHERE status = 'compressed'").get() as any)?.c ?? 0;
+    const noteCount = (this.db.prepare('SELECT COUNT(*) as c FROM notes').get() as any)?.c ?? 0;
+    const tokenStats = (this.db.prepare(
+      "SELECT COALESCE(SUM(tokens_saved), 0) as saved, COALESCE(SUM(original_tokens), 0) as original FROM observations WHERE status = 'compressed'"
+    ).get() as any) ?? { saved: 0, original: 0 };
+    const lastSession = (this.db.prepare('SELECT created_at FROM sessions ORDER BY created_at DESC LIMIT 1').get() as any);
+
+    return {
+      sessionCount,
+      observationCount,
+      compressedCount,
+      noteCount,
+      tokensSaved: tokenStats.saved,
+      originalTokens: tokenStats.original,
+      lastSessionCreatedAt: lastSession?.created_at
+    };
+  }
+
   private buildSearchQuery(prompt: string): string {
     const keywords = prompt
       .toLowerCase()
-      .replace(/[^\w\s]/g, '')
+      .replace(/[^\p{L}\p{N}\s]/gu, '')
       .split(/\s+/)
-      .filter((w) => w.length >= 3)
+      .filter((w) => w.length >= 2)
       .slice(0, 10);
     return keywords.join(' OR ');
   }
@@ -391,6 +421,10 @@ export class MemoryDatabase {
         ai_response,
         annotation
       );
+
+      CREATE INDEX IF NOT EXISTS idx_sessions_project_status ON sessions(project_path, status);
+      CREATE INDEX IF NOT EXISTS idx_observations_session ON observations(session_id);
+      CREATE INDEX IF NOT EXISTS idx_notes_session ON notes(session_id);
 
       CREATE TRIGGER IF NOT EXISTS sessions_fts_insert AFTER INSERT ON sessions BEGIN
         INSERT INTO sessions_fts(session_id, user_prompt, summary)

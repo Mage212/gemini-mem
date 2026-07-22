@@ -145,4 +145,45 @@ describe('CompressionQueue', () => {
     db.close();
     delete process.env.MOCK_GEMINI;
   });
+
+  it('FTS5 search supports Cyrillic and Unicode queries', () => {
+    const dbFile = tempDbPath();
+    dbPaths.push(dbFile);
+    const db = new MemoryDatabase(dbFile);
+    const session = db.createSession('/tmp/unicode-app');
+    db.saveNote(session.id, 'исправление авторизации', 'исправлен баг в модуле входа');
+
+    const searchResults = db.searchNotes('/tmp/unicode-app', 'авторизации');
+    expect(searchResults.length).toBe(1);
+    expect(searchResults[0].user_prompt).toContain('авторизации');
+    db.close();
+  });
+
+  it('updateObservationResult handles raw strings without double JSON quoting', () => {
+    const dbFile = tempDbPath();
+    dbPaths.push(dbFile);
+    const db = new MemoryDatabase(dbFile);
+    const session = db.createSession('/tmp/quoting-app');
+    const obs = db.saveObservation(session.id, 'edit', { details: 'file created' });
+    db.updateObservationResult(obs.id, 'plain text result');
+
+    const updated = db.getObservation(obs.id)!;
+    expect(updated.function_result).toBe('plain text result');
+    db.close();
+  });
+
+  it('getStats returns accurate aggregate database metrics', () => {
+    const dbFile = tempDbPath();
+    dbPaths.push(dbFile);
+    const db = new MemoryDatabase(dbFile);
+    const session = db.createSession('/tmp/stats-app');
+    db.saveNote(session.id, 'note 1', 'res 1');
+    const obs = db.saveObservation(session.id, 'action', { details: 'info' });
+
+    const stats = db.getStats();
+    expect(stats.sessionCount).toBe(1);
+    expect(stats.noteCount).toBe(1);
+    expect(stats.observationCount).toBe(1);
+    db.close();
+  });
 });

@@ -12,7 +12,7 @@ const program = new Command();
 program
   .name('antigravity-mem')
   .description('Persistent memory layer for Antigravity IDE / Gemini CLI')
-  .version('0.3.1');
+  .version('0.4.0');
 
 // ─── Init command (no DB needed) ─────────────────────────────────────────────
 
@@ -117,33 +117,23 @@ program
   .action(() => {
     try {
       const db = getDb();
-      const dbAny = (db as any);
-
-      const sessionCount = dbAny.db.prepare('SELECT COUNT(*) as count FROM sessions').get().count;
-      const noteCount = dbAny.db.prepare('SELECT COUNT(*) as count FROM notes').get().count;
-      const obsCount = dbAny.db.prepare('SELECT COUNT(*) as count FROM observations').get().count;
-      const tokenStats = dbAny.db.prepare(
-        'SELECT COALESCE(SUM(tokens_saved), 0) as saved, COALESCE(SUM(original_tokens), 0) as original FROM observations WHERE status = \'compressed\''
-      ).get();
-      const lastSession = dbAny.db.prepare(
-        'SELECT created_at FROM sessions ORDER BY created_at DESC LIMIT 1'
-      ).get();
+      const stats = db.getStats();
 
       console.log('');
       console.log('  ╔══════════════════════════════════════╗');
       console.log('  ║     Antigravity Memory Stats         ║');
       console.log('  ╚══════════════════════════════════════╝');
       console.log('');
-      console.log(`  Sessions:      ${sessionCount}`);
-      console.log(`  Notes:         ${noteCount}`);
-      console.log(`  Observations:  ${obsCount}`);
-      console.log(`  Tokens saved:  ${tokenStats.saved.toLocaleString()}`);
-      if (tokenStats.original > 0) {
-        const ratio = ((tokenStats.saved / tokenStats.original) * 100).toFixed(1);
+      console.log(`  Sessions:      ${stats.sessionCount}`);
+      console.log(`  Notes:         ${stats.noteCount}`);
+      console.log(`  Observations:  ${stats.observationCount}`);
+      console.log(`  Tokens saved:  ${stats.tokensSaved.toLocaleString()}`);
+      if (stats.originalTokens > 0) {
+        const ratio = ((stats.tokensSaved / stats.originalTokens) * 100).toFixed(1);
         console.log(`  Compression:   ${ratio}% reduction`);
       }
-      if (lastSession) {
-        const date = new Date(lastSession.created_at).toISOString().split('T')[0];
+      if (stats.lastSessionCreatedAt) {
+        const date = new Date(stats.lastSessionCreatedAt).toISOString().split('T')[0];
         console.log(`  Last session:  ${date}`);
       }
       console.log('');

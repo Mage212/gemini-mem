@@ -43,6 +43,11 @@ describe('AgyCliClient', () => {
     const summary = await client.summarizeSession('Test goal', ['obs1', 'obs2']);
     expect(summary).toContain('MOCK SUMMARY (AGY)');
   });
+
+  it('stores and exposes custom modelName', () => {
+    const client = new AgyCliClient({ mock: true, modelName: 'custom-agy-model' });
+    expect(client.getModelName()).toBe('custom-agy-model');
+  });
 });
 
 describe('FallbackLLMClient', () => {

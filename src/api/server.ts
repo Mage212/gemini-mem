@@ -1,5 +1,4 @@
 #!/usr/bin/env ts-node
-// @ts-nocheck
 /**
  * Experimental / legacy HTTP API for local debugging.
  * Primary production path is MCP (src/mcp/server.ts).
@@ -165,22 +164,16 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/stats') {
-      const sessionCount = db.db.prepare('SELECT COUNT(*) as c FROM sessions').get().c;
-      const obsCount = db.db.prepare('SELECT COUNT(*) as c FROM observations').get().c;
-      const compressedCount = db.db.prepare("SELECT COUNT(*) as c FROM observations WHERE status='compressed'").get().c;
-      const notesCount = db.db.prepare('SELECT COUNT(*) as c FROM notes').get().c;
-      const tokenStats = db.db.prepare(
-        "SELECT COALESCE(SUM(tokens_saved),0) as saved, COALESCE(SUM(original_tokens),0) as original FROM observations WHERE status = 'compressed'"
-      ).get();
-      const avgCompression = tokenStats.original > 0
-        ? Number(((tokenStats.saved / tokenStats.original) * 100).toFixed(2))
+      const stats = db.getStats();
+      const avgCompression = stats.originalTokens > 0
+        ? Number(((stats.tokensSaved / stats.originalTokens) * 100).toFixed(2))
         : 0;
       return send(res, 200, {
-        sessions: sessionCount,
-        observations: obsCount,
-        compressed: compressedCount,
-        notes: notesCount,
-        tokensSaved: tokenStats.saved,
+        sessions: stats.sessionCount,
+        observations: stats.observationCount,
+        compressed: stats.compressedCount,
+        notes: stats.noteCount,
+        tokensSaved: stats.tokensSaved,
         averageCompressionPct: avgCompression
       });
     }
