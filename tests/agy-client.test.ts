@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { AgyCliClient } from '../src/gemini/agy-client.js';
 import { FallbackLLMClient } from '../src/gemini/fallback-client.js';
 import { createLLMClient } from '../src/gemini/factory.js';
 import { LLMClient } from '../src/gemini/client-interface.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const fakeAgyPath = path.resolve(__dirname, 'fixtures/fake-agy.js');
 
 class MockSuccessClient implements LLMClient {
   getModelName() {
@@ -47,6 +53,16 @@ describe('AgyCliClient', () => {
   it('stores and exposes custom modelName', () => {
     const client = new AgyCliClient({ mock: true, modelName: 'custom-agy-model' });
     expect(client.getModelName()).toBe('custom-agy-model');
+  });
+
+  it('parses structured JSON output when agy outputs JSON format', async () => {
+    const client = new AgyCliClient({
+      mock: false,
+      agyPath: fakeAgyPath
+    });
+
+    const summary = await client.summarizeSession('Test prompt', ['obs1']);
+    expect(summary).toBe('Parsed via structured JSON');
   });
 });
 

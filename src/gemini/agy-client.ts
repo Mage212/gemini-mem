@@ -59,7 +59,7 @@ export class AgyCliClient implements LLMClient {
   }
 
   private async runAgyPrompt(prompt: string, operationName: string): Promise<string> {
-    const args: string[] = [];
+    const args: string[] = ['--output-format', 'json'];
     const targetModel = process.env.AGY_MODEL || (this.modelName !== 'agy-cli' ? this.modelName : undefined);
     if (targetModel) {
       args.push('--model', targetModel);
@@ -81,6 +81,21 @@ export class AgyCliClient implements LLMClient {
         maxBuffer: 10 * 1024 * 1024,
         env: process.env
       });
+
+      // Try parsing JSON output from agy --output-format json
+      try {
+        const parsed = JSON.parse(stdout.trim());
+        if (parsed && typeof parsed === 'object' && typeof parsed.response === 'string') {
+          const text = parsed.response.trim();
+          console.error(`[AGY Client] ${operationName} completed successfully via JSON output`, {
+            responseLength: text.length,
+            usage: parsed.usage
+          });
+          return text;
+        }
+      } catch {
+        // Fallback for older agy CLI versions returning plain text or ANSI
+      }
 
       // Strip ANSI escape codes and clean trailing whitespace
       const cleaned = stdout.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').trim();
