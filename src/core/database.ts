@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import Database from 'better-sqlite3';
 import { randomUUID as uuidv4 } from 'crypto';
 import { normalizeProjectPath } from './paths';
@@ -64,7 +65,7 @@ export class MemoryDatabase {
   private db: any;
 
   constructor(dbPath?: string) {
-    const defaultPath = path.join(process.cwd(), 'data', 'antigravity-mem.db');
+    const defaultPath = path.join(os.homedir(), '.antigravity-mem', 'memory.db');
     const resolvedPath = dbPath ?? process.env.ANTIGRAVITY_MEM_DB ?? defaultPath;
     const dir = path.dirname(resolvedPath);
     if (!fs.existsSync(dir)) {
