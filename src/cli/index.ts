@@ -197,9 +197,9 @@ program
     const db = getDb();
     const obs = db.getObservation(opts.observation);
     if (!obs) throw new Error('observation not found');
-    const { GeminiClient } = require('../gemini/client');
-    const gemini = new GeminiClient();
-    const compressed = await gemini.compressObservation({
+    const { createLLMClient } = require('../gemini/factory');
+    const llm = createLLMClient();
+    const compressed = await llm.compressObservation({
       functionName: obs.function_name,
       functionArgs: obs.function_args,
       functionResult: obs.function_result
@@ -227,10 +227,10 @@ program
   .requiredOption('-s, --session <id>', 'session id')
   .action(async (opts) => {
     const db = getDb();
-    const { GeminiClient } = require('../gemini/client');
+    const { createLLMClient } = require('../gemini/factory');
     const { SessionSummarizer } = require('../gemini/summarizer');
-    const gemini = new GeminiClient();
-    const summarizer = new SessionSummarizer(db, gemini);
+    const llm = createLLMClient();
+    const summarizer = new SessionSummarizer(db, llm);
     const summary = await summarizer.summarize(opts.session);
     console.log(summary);
   });
