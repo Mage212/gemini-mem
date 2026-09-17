@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import path from 'node:path';
 import { normalizeProjectPath } from '../src/core/paths';
 
 describe('normalizeProjectPath', () => {
   it('resolves relative paths to absolute', () => {
     const result = normalizeProjectPath('.');
-    expect(result.startsWith('/')).toBe(true);
-    expect(result.endsWith('/')).toBe(false);
+    expect(path.isAbsolute(result)).toBe(true);
+    expect(result.endsWith('/') || result.endsWith('\\')).toBe(false);
   });
 
   it('strips trailing slashes', () => {

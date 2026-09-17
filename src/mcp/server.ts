@@ -39,7 +39,7 @@ try {
 
 const server = new McpServer({
   name: 'antigravity-memory',
-  version: '0.4.0'
+  version: '0.4.1'
 });
 
 server.tool(
